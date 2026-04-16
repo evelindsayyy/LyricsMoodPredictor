@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data — too large to commit, keep local
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Raw SpotGenTrack dump (local only)
+SpotGenTrack/
+spotgentrack/
+
+# Stray Genius dump (not used)
+song_lyrics.csv
+
+# Model artifacts
+models/*.pkl
+models/*.npy
+models/*.joblib
+!models/.gitkeep
+
+# Results (regeneratable)
+results/*.png
+results/*.csv
+!results/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
