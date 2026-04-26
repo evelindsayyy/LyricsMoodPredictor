@@ -7,7 +7,7 @@ A small web app that reads song lyrics, predicts the mood, explains *why*, and s
 LyricMood is a two-model system glued together by a Streamlit UI. You paste song lyrics into the web app and get three things back:
 
 1. **A mood prediction** (one of *Hype, Romantic, Calm, Sad, Angry*) with a confidence score, produced by a logistic regression trained on TF-IDF features of ~76,000 labeled songs.
-2. **A word-level explanation** of that prediction, using SHAP to pull the top-10 words that pushed the model toward (or away from) the predicted mood — so the model isn't a black box.
+2. **A word-level explanation** of that prediction (interpretability via SHAP), pulling the top-10 words that pushed the model toward (or away from) the predicted mood — so the model isn't a black box.
 3. **Five similar songs**, found by embedding the lyrics with a frozen MiniLM sentence-transformer and ranking the corpus by cosine similarity (filtered to the predicted mood).
 
 Labels come from Spotify's audio features (valence + energy, cut into mood regions based on [Russell's circumplex model](#research-connections)), so the model is learning which lyrical patterns tend to go with which audio-derived moods.
