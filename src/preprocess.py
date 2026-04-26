@@ -1,24 +1,25 @@
-"""Preprocessing utilities for LyricMood.
+"""
+Preprocessing helpers — text cleaning, mood labels, gap-zone filtering.
 
-This module owns mood-label derivation from Spotify's valence/energy audio
-features, plus text cleaning and class-weight helpers used by the classifier.
+Mood labels come from Spotify's valence (positivity) and energy (intensity).
+Based on Russell's circumplex idea: the 2D valence-energy space gets cut
+into 5 mood regions + a central "gap zone" I drop because those songs
+don't clearly belong to any mood.
 
-The mood taxonomy follows Russell's circumplex model: two axes (valence = how
-positive, energy = how intense) give a 2D mood space. We discretize it into
-five moods plus a central "gap zone" that's too ambiguous to label cleanly.
+AI attribution: implementation by Claude (Anthropic) based on my specification.
+I chose the 5-mood taxonomy, the threshold values (0.3/0.6 valence, 0.4/0.6
+energy), the gap-zone rule, and the clean_text behavior. Claude wrote the
+function bodies. I reviewed and tested all output. See ../ATTRIBUTION.md
+for the full breakdown.
 """
 
-from __future__ import annotations
-
 import re
-import string
 
-import numpy as np
 import pandas as pd
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 
-# --- Mood thresholds (valence = positivity, energy = intensity, both in [0,1])
-# Chosen so the 3x3 grid of (low / mid / high) cells partitions cleanly into
-# 5 mood quadrants + a middle gap zone we discard during training.
+
+# thresholds on valence and energy (both 0-1)
 VALENCE_LOW = 0.3
 VALENCE_HIGH = 0.6
 ENERGY_LOW = 0.4
@@ -26,20 +27,27 @@ ENERGY_HIGH = 0.6
 
 MOODS = ["Hype", "Romantic", "Calm", "Sad", "Angry"]
 
+STOPWORDS = set(ENGLISH_STOP_WORDS)
+
+
+def clean_text(text: str) -> str:
+    """Lowercase, strip Genius section headers + punctuation, drop stopwords."""
+    if not isinstance(text, str):
+        return ""
+    # strip stuff like [Chorus], [Verse 1: Artist]
+    text = re.sub(r"\[[^\]]*\]", " ", text)
+    text = text.lower()
+    # keep letters and spaces only
+    text = re.sub(r"[^a-z\s]", " ", text)
+    words = [w for w in text.split() if w not in STOPWORDS]
+    return " ".join(words)
+
 
 def derive_mood_labels(df: pd.DataFrame) -> pd.DataFrame:
-    """Add a `mood` column to df based on valence/energy thresholds.
+    """Add a 'mood' column based on valence/energy thresholds.
 
-    Mapping (valence x energy grid):
-        v>=0.6, e>=0.6          -> Hype        (happy + energetic)
-        v>=0.6, e<0.6           -> Romantic    (happy + mellow)
-        0.3<=v<0.6, e<0.4       -> Calm        (neutral + low energy)
-        0.3<=v<0.6, 0.4<=e<0.6  -> (gap zone — labeled None)
-        0.3<=v<0.6, e>=0.6      -> Hype        (neutral-leaning but intense)
-        v<0.3, e>=0.6           -> Angry       (negative + intense)
-        v<0.3, e<0.6            -> Sad         (negative + low/mid energy)
-
-    Returns a new DataFrame; input is not mutated.
+    Gap-zone rows (middle of both axes) get NaN — filter them out
+    before training.
     """
     out = df.copy()
     v = out["valence"].astype(float)
@@ -47,26 +55,23 @@ def derive_mood_labels(df: pd.DataFrame) -> pd.DataFrame:
 
     mood = pd.Series(index=out.index, dtype="object")
 
-    # High valence
+    # high valence
     mood[(v >= VALENCE_HIGH) & (e >= ENERGY_HIGH)] = "Hype"
     mood[(v >= VALENCE_HIGH) & (e < ENERGY_HIGH)] = "Romantic"
-
-    # Low valence
+    # low valence
     mood[(v < VALENCE_LOW) & (e >= ENERGY_HIGH)] = "Angry"
     mood[(v < VALENCE_LOW) & (e < ENERGY_HIGH)] = "Sad"
-
-    # Mid valence: Calm at low energy, Hype at high energy, gap in middle
+    # mid valence — Calm when low energy, Hype when high, gap in the middle
     mid_v = (v >= VALENCE_LOW) & (v < VALENCE_HIGH)
     mood[mid_v & (e < ENERGY_LOW)] = "Calm"
     mood[mid_v & (e >= ENERGY_HIGH)] = "Hype"
-    # mid valence AND mid energy remains NaN (gap zone)
 
     out["mood"] = mood
     return out
 
 
 def is_gap_zone(df: pd.DataFrame) -> pd.Series:
-    """Boolean mask: True where valence/energy fall in the ambiguous middle."""
+    """Boolean mask: True where a song falls in the ambiguous middle."""
     v = df["valence"].astype(float)
     e = df["energy"].astype(float)
     return (
@@ -75,27 +80,13 @@ def is_gap_zone(df: pd.DataFrame) -> pd.Series:
     )
 
 
-# --- Text cleaning (used by Task 2 + modeling) ------------------------------
-
-# Strip Genius-style section headers like [Chorus], [Verse 1: Artist]
-_SECTION_HEADER = re.compile(r"\[[^\]]*\]")
-_PUNCT_TABLE = str.maketrans("", "", string.punctuation)
-_WHITESPACE = re.compile(r"\s+")
-
-
-def clean_text(text: str) -> str:
-    """Lowercase, drop section headers and punctuation, collapse whitespace."""
-    if not isinstance(text, str):
-        return ""
-    text = _SECTION_HEADER.sub(" ", text)
-    text = text.lower()
-    text = text.translate(_PUNCT_TABLE)
-    text = _WHITESPACE.sub(" ", text).strip()
-    return text
+def filter_gap_zone(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows in the gap zone. Returns a new DataFrame."""
+    return df[~is_gap_zone(df)].copy()
 
 
 def get_class_weights(y: pd.Series) -> dict:
-    """Balanced class weights: inversely proportional to class frequency."""
+    """Balanced weights — inverse class frequency, normalized."""
     counts = y.value_counts()
     n = len(y)
     k = len(counts)
